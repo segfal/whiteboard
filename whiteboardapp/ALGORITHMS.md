@@ -10,7 +10,7 @@ This document provides detailed explanations of the algorithms used in the white
 #### Mathematical Foundation
 The quadratic Bézier curve is defined by:
 
-$$ B(t) = (1-t)^2P_0 + 2(1-t)tP_1 + t^2P_2, \quad t \in [0,1] $$
+$$B(t) = (1-t)^2P_0 + 2(1-t)tP_1 + t^2P_2, \quad t \in [0,1]$$
 
 where:
 - $P_0$ is the start point
@@ -19,7 +19,7 @@ where:
 - $t$ is the curve parameter
 
 Control points are calculated as:
-$$ P_1 = \frac{P_0 + P_2}{2} $$
+$$P_1 = \frac{P_0 + P_2}{2}$$
 
 #### Implementation Location
 [View in whiteboard.cpp](./src/wasm/whiteboard.cpp#L150-L200)
@@ -55,10 +55,10 @@ void Line::draw(emscripten::val context) {
 
 #### Mathematical Foundation
 Rectangle defined by four points:
-$$ R = \{(x_1,y_1), (x_2,y_1), (x_2,y_2), (x_1,y_2)\} $$
+$$R = \{(x_1,y_1), (x_2,y_1), (x_2,y_2), (x_1,y_2)\}$$
 
 Border thickness vector calculation:
-$$ \vec{n} = \frac{(y_2-y_1, -(x_2-x_1))}{\sqrt{(x_2-x_1)^2 + (y_2-y_1)^2}} \cdot thickness $$
+$$\vec{n} = \frac{(y_2-y_1, -(x_2-x_1))}{\sqrt{(x_2-x_1)^2 + (y_2-y_1)^2}} \cdot thickness$$
 
 #### Implementation Location
 [View in whiteboard.cpp](./src/wasm/whiteboard.cpp#L220-L250)
@@ -86,11 +86,11 @@ void Rectangle::draw(emscripten::val context) {
 
 #### Mathematical Foundation
 Circle equation:
-$$ (x - h)^2 + (y - k)^2 = r^2 $$
+$$(x - h)^2 + (y - k)^2 = r^2$$
 
 Arc parametric equations:
-$$ x = h + r\cos(\theta) $$
-$$ y = k + r\sin(\theta) $$
+$$x = h + r\cos(\theta)$$
+$$y = k + r\sin(\theta)$$
 
 where:
 - $(h,k)$ is the center
@@ -126,13 +126,13 @@ void Circle::draw(emscripten::val context) {
 [Wikipedia References](https://en.wikipedia.org/wiki/Point_in_polygon)
 
 #### Point-to-Line Distance
-$$ d = \frac{|ax_0 + by_0 + c|}{\sqrt{a^2 + b^2}} $$
+$$d = \frac{|ax_0 + by_0 + c|}{\sqrt{a^2 + b^2}}$$
 
 #### Point-in-Rectangle Test
-$$ x_1 \leq x \leq x_2 \land y_1 \leq y \leq y_2 $$
+$$x_1 \leq x \leq x_2 \land y_1 \leq y \leq y_2$$
 
 #### Point-to-Circle Distance
-$$ d = \sqrt{(x-h)^2 + (y-k)^2} \leq r $$
+$$d = \sqrt{(x-h)^2 + (y-k)^2} \leq r$$
 
 #### Implementation Location
 [View in whiteboard.cpp](./src/wasm/whiteboard.cpp#L350-L400)
@@ -172,11 +172,11 @@ bool Circle::containsPoint(float x, float y) {
 [Wikipedia Reference](https://en.wikipedia.org/wiki/Line_segment_intersection)
 
 #### Rectangle Intersection Test
-$$ \max(x_1,x_2) < \min(x_3,x_4) \land \max(y_1,y_2) < \min(y_3,y_4) $$
+$$\max(x_1,x_2) < \min(x_3,x_4) \land \max(y_1,y_2) < \min(y_3,y_4)$$
 
 #### Line Intersection
 For lines $P_1P_2$ and $P_3P_4$:
-$$ t = \frac{(x_1-x_3)(y_3-y_4) - (y_1-y_3)(x_3-x_4)}{(x_1-x_2)(y_3-y_4) - (y_1-y_2)(x_3-x_4)} $$
+$$t = \frac{(x_1-x_3)(y_3-y_4) - (y_1-y_3)(x_3-x_4)}{(x_1-x_2)(y_3-y_4) - (y_1-y_2)(x_3-x_4)}$$
 
 ## 3. Eraser Algorithm
 
@@ -184,13 +184,13 @@ $$ t = \frac{(x_1-x_3)(y_3-y_4) - (y_1-y_3)(x_3-x_4)}{(x_1-x_2)(y_3-y_4) - (y_1-
 [Wikipedia Reference](https://en.wikipedia.org/wiki/Collision_detection#Circle_collision)
 
 #### Circle-Point Distance Test
-$$ d = \sqrt{(x_2-x_1)^2 + (y_2-y_1)^2} \leq r $$
+$$d = \sqrt{(x_2-x_1)^2 + (y_2-y_1)^2} \leq r$$
 
 #### Path Splitting
 For a line segment $\overline{AB}$ intersecting circle $(h,k,r)$:
-$$ (x-h)^2 + (y-k)^2 = r^2 $$
-$$ x = x_1 + t(x_2-x_1) $$
-$$ y = y_1 + t(y_2-y_1) $$
+$$(x-h)^2 + (y-k)^2 = r^2$$
+$$x = x_1 + t(x_2-x_1)$$
+$$y = y_1 + t(y_2-y_1)$$
 
 #### Implementation Location
 [View in whiteboard.cpp](./src/wasm/whiteboard.cpp#L450-L500)
@@ -231,7 +231,7 @@ void Whiteboard::erase(float x, float y, float radius) {
 [Wikipedia Reference](https://en.wikipedia.org/wiki/Moving_average#Exponential_moving_average)
 
 #### Smoothing Formula
-$$ S_t = \alpha x_t + (1-\alpha)S_{t-1} $$
+$$S_t = \alpha x_t + (1-\alpha)S_{t-1}$$
 
 where:
 - $S_t$ is the smoothed value
@@ -264,7 +264,7 @@ private smoothInput(x: number, y: number): Point {
 ```
 
 ### 4.2 Coordinate Transformation
-$$ \begin{bmatrix} x' \\ y' \\ 1 \end{bmatrix} = \begin{bmatrix} a & b & c \\ d & e & f \\ 0 & 0 & 1 \end{bmatrix} \begin{bmatrix} x \\ y \\ 1 \end{bmatrix} $$
+$$\begin{bmatrix} x' \\ y' \\ 1 \end{bmatrix} = \begin{bmatrix} a & b & c \\ d & e & f \\ 0 & 0 & 1 \end{bmatrix} \begin{bmatrix} x \\ y \\ 1 \end{bmatrix}$$
 
 ## 5. Memory Management
 
@@ -272,7 +272,7 @@ $$ \begin{bmatrix} x' \\ y' \\ 1 \end{bmatrix} = \begin{bmatrix} a & b & c \\ d 
 [Wikipedia Reference](https://en.wikipedia.org/wiki/Reference_counting)
 
 #### Memory Usage Formula
-$$ M_{total} = M_{base} + \sum_{i=1}^n M_{element_i} $$
+$$M_{total} = M_{base} + \sum_{i=1}^n M_{element_i}$$
 
 where:
 - $M_{total}$ is total memory usage
@@ -311,7 +311,7 @@ private:
 [Wikipedia Reference](https://en.wikipedia.org/wiki/Memory_pool)
 
 #### Memory Pool Usage Formula
-$$ M_{total} = M_{pool} + \sum_{i=1}^n M_{element_i} $$
+$$M_{total} = M_{pool} + \sum_{i=1}^n M_{element_i}$$
 
 where:
 - $M_{total}$ is total memory usage
