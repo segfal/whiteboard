@@ -1,248 +1,337 @@
 /**
  * @file Whiteboard.tsx
- * @brief React component for the whiteboard interface
- * 
- * This component provides the user interface for the whiteboard application.
- * It manages:
- * - Canvas setup and sizing
- * - Tool selection (draw, select, erase)
- * - Shape selection (freehand, rectangle, circle)
- * - Color and thickness controls
- * - Action buttons (clear, delete)
+ * @brief React component for the whiteboard interface with Excalidraw-like UI
  */
 
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { WhiteboardWrapper, ShapeType } from '../lib/whiteboard';
+import { WhiteboardWrapper, ShapeType, Tool } from '../lib/whiteboard';
+import { ColorManager } from '../lib/patterns/ColorManager';
+import { ToolManager } from '../lib/patterns/ToolManager';
+import { ExportManager } from '../lib/patterns/ExportManager';
+import { ShapeManager, ShapeFactory } from '../lib/patterns/ShapeManager';
 
 /**
  * @brief Main whiteboard component
  * 
  * This component integrates the WebAssembly whiteboard functionality
  * with React's component lifecycle and state management.
- * 
- * Features:
- * - Responsive canvas sizing
- * - Tool selection UI
- * - Drawing controls
- * - Touch and mouse support
  */
 export default function Whiteboard() {
-    // Refs for canvas and whiteboard instance
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const whiteboardRef = useRef<WhiteboardWrapper | null>(null);
+    const colorManagerRef = useRef<ColorManager | null>(null);
+    const toolManagerRef = useRef<ToolManager | null>(null);
+    const exportManagerRef = useRef<ExportManager | null>(null);
+    const shapeManagerRef = useRef<ShapeManager | null>(null);
 
-    // State for drawing settings
-    const [color, setColor] = useState('#000000');           // Current color
-    const [thickness, setThickness] = useState(2);           // Line thickness
-    const [currentTool, setCurrentTool] = useState<'draw' | 'select' | 'erase'>('draw');  // Active tool
-    const [currentShape, setCurrentShape] = useState<ShapeType>(ShapeType.FREEHAND);      // Active shape
+    const [currentTool, setCurrentTool] = useState<Tool>(Tool.DRAW);
+    const [currentShape, setCurrentShape] = useState<ShapeType>(ShapeType.FREEHAND);
+    const [isDarkMode, setIsDarkMode] = useState(window.matchMedia('(prefers-color-scheme: dark)').matches);
+    const [currentColor, setCurrentColor] = useState<string>('');
+    const [currentThickness, setCurrentThickness] = useState(2);
+    const [eraserSize, setEraserSize] = useState(20);
+    const [isDraggingShape, setIsDraggingShape] = useState(false);
+    const [draggedShape, setDraggedShape] = useState<ShapeType | null>(null);
 
-    /**
-     * @brief Initialize whiteboard on component mount
-     * 
-     * This effect:
-     * 1. Sets up the canvas size
-     * 2. Initializes the whiteboard wrapper
-     * 3. Sets up window resize handling
-     */
+    // Initialize managers and state
     useEffect(() => {
+        if (!canvasRef.current) return;
+
+        const whiteboard = new WhiteboardWrapper();
+        whiteboardRef.current = whiteboard;
+
         const initWhiteboard = async () => {
-            if (!canvasRef.current) return;
+            try {
+                await whiteboard.initialize(canvasRef.current!);
+                
+                // Initialize managers
+                colorManagerRef.current = new ColorManager(isDarkMode, (color) => {
+                    setCurrentColor(color);
+                    whiteboard.setColor(color);
+                });
 
-            // Set canvas size to window dimensions
-            const canvas = canvasRef.current;
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+                toolManagerRef.current = new ToolManager(whiteboard, () => {
+                    // Handle state changes
+                });
 
-            // Create and initialize whiteboard instance
-            const whiteboard = new WhiteboardWrapper();
-            await whiteboard.initialize(canvas);
-            whiteboardRef.current = whiteboard;
+                exportManagerRef.current = new ExportManager(() => whiteboard.getSVGContent());
+                
+                shapeManagerRef.current = new ShapeManager();
+
+                // Set initial states
+                const color = isDarkMode ? '#FFFFFF' : '#000000';
+                colorManagerRef.current.setColor(color);
+                whiteboard.setThickness(currentThickness);
+                whiteboard.setShape(currentShape);
+                whiteboard.setTool(currentTool);
+                whiteboard.setEraserSize(eraserSize);
+            } catch (error) {
+                console.error('Failed to initialize whiteboard:', error);
+            }
         };
 
         initWhiteboard();
 
-        // Handle window resize events
-        const handleResize = () => {
-            if (!canvasRef.current) return;
-            canvasRef.current.width = window.innerWidth;
-            canvasRef.current.height = window.innerHeight;
+        return () => {
+            whiteboardRef.current = null;
+            colorManagerRef.current = null;
+            toolManagerRef.current = null;
+            exportManagerRef.current = null;
+            shapeManagerRef.current = null;
         };
-
-        window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
     }, []);
 
-    /**
-     * @brief Update whiteboard color when changed
-     */
-    useEffect(() => {
-        if (whiteboardRef.current) {
-            whiteboardRef.current.setColor(color);
+    const toggleDarkMode = () => {
+        const newDarkMode = !isDarkMode;
+        setIsDarkMode(newDarkMode);
+        
+        if (canvasRef.current) {
+            canvasRef.current.style.backgroundColor = newDarkMode ? '#1a1a1a' : '#ffffff';
         }
-    }, [color]);
 
-    /**
-     * @brief Update line thickness when changed
-     */
-    useEffect(() => {
+        if (colorManagerRef.current) {
+            colorManagerRef.current.toggleDarkMode();
+        }
+    };
+
+    const handleShapeDragStart = (e: React.DragEvent, shape: ShapeType) => {
+        e.dataTransfer.setData('application/shape', shape);
+        setIsDraggingShape(true);
+        setDraggedShape(shape);
+    };
+
+    const handleShapeDragEnd = (e: React.DragEvent) => {
+        setIsDraggingShape(false);
+        setDraggedShape(null);
+    };
+
+    const handleCanvasDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        if (canvasRef.current) {
+            canvasRef.current.style.cursor = 'copy';
+        }
+    };
+
+    const handleCanvasDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        if (!whiteboardRef.current || !canvasRef.current || !shapeManagerRef.current) return;
+
+        const rect = canvasRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const shape = e.dataTransfer.getData('application/shape') as ShapeType;
+
+        if (shape) {
+            const newShape = ShapeFactory.createShape(shape, x, y, currentColor, currentThickness);
+            shapeManagerRef.current.addShape(newShape);
+            whiteboardRef.current.redraw();
+        }
+
+        setIsDraggingShape(false);
+        setDraggedShape(null);
+        if (canvasRef.current) {
+            canvasRef.current.style.cursor = 'default';
+        }
+    };
+
+    const handleToolChange = (tool: Tool) => {
+        setCurrentTool(tool);
+        if (toolManagerRef.current) {
+            toolManagerRef.current.setTool(tool);
+        }
+    };
+
+    const handleColorChange = (color: string) => {
+        if (colorManagerRef.current) {
+            colorManagerRef.current.setColor(color);
+        }
+    };
+
+    const handleThicknessChange = (thickness: number) => {
+        setCurrentThickness(thickness);
         if (whiteboardRef.current) {
             whiteboardRef.current.setThickness(thickness);
         }
-    }, [thickness]);
+    };
 
-    /**
-     * @brief Toggle selection mode when tool changes
-     */
-    useEffect(() => {
+    const handleEraserSizeChange = (size: number) => {
+        setEraserSize(size);
         if (whiteboardRef.current) {
-            whiteboardRef.current.toggleSelection(currentTool === 'select');
+            whiteboardRef.current.setEraserSize(size);
         }
-    }, [currentTool]);
+    };
 
-    /**
-     * @brief Update shape type when changed
-     */
-    useEffect(() => {
-        if (whiteboardRef.current) {
-            whiteboardRef.current.setShape(currentShape);
-        }
-    }, [currentShape]);
-
-    /**
-     * @brief Clear the entire canvas
-     */
     const handleClear = () => {
         if (whiteboardRef.current) {
             whiteboardRef.current.clear();
         }
     };
 
-    /**
-     * @brief Delete selected elements
-     */
     const handleDelete = () => {
-        if (whiteboardRef.current && currentTool === 'select') {
+        if (whiteboardRef.current) {
             whiteboardRef.current.deleteSelection();
         }
     };
 
+    const exportAsPNG = () => {
+        if (!canvasRef.current || !exportManagerRef.current) return;
+        exportManagerRef.current.export('png', canvasRef.current, isDarkMode);
+    };
+
+    const exportAsSVG = () => {
+        if (!canvasRef.current || !exportManagerRef.current) return;
+        exportManagerRef.current.export('svg', canvasRef.current, isDarkMode);
+    };
+
     return (
-        <div className="relative w-full h-screen">
-            {/* Canvas Element */}
-            <canvas
-                ref={canvasRef}
-                className="absolute top-0 left-0 w-full h-full"
-            />
-
-            {/* Tools Panel */}
-            <div className="absolute top-4 left-4 flex flex-col gap-4">
-                {/* Drawing Tools */}
-                <div className="bg-white p-4 rounded-lg shadow-lg flex gap-4">
+        <div className="h-screen w-screen flex relative bg-[#121212] text-white">
+            {/* Left Toolbar */}
+            <div className="absolute left-2 top-1/2 transform -translate-y-1/2 bg-[#1e1e1e] rounded-lg p-2 shadow-lg">
+                <div className="flex flex-col gap-2">
                     <button
-                        onClick={() => setCurrentTool('draw')}
-                        className={`px-4 py-2 rounded ${
-                            currentTool === 'draw' ? 'bg-blue-500 text-white' : 'bg-gray-200'
-                        }`}
-                        title="Draw shapes and lines"
+                        className={`p-3 rounded-lg ${currentTool === Tool.DRAW ? 'bg-[#3d3d3d]' : 'hover:bg-[#2d2d2d]'}`}
+                        onClick={() => handleToolChange(Tool.DRAW)}
+                        title="Draw"
                     >
-                        Draw
+                        ✏️
                     </button>
                     <button
-                        onClick={() => setCurrentTool('select')}
-                        className={`px-4 py-2 rounded ${
-                            currentTool === 'select' ? 'bg-blue-500 text-white' : 'bg-gray-200'
-                        }`}
-                        title="Select and move elements"
+                        className={`p-3 rounded-lg ${currentTool === Tool.SELECT ? 'bg-[#3d3d3d]' : 'hover:bg-[#2d2d2d]'}`}
+                        onClick={() => handleToolChange(Tool.SELECT)}
+                        title="Select"
                     >
-                        Select
+                        ↖️
                     </button>
                     <button
-                        onClick={() => setCurrentTool('erase')}
-                        className={`px-4 py-2 rounded ${
-                            currentTool === 'erase' ? 'bg-blue-500 text-white' : 'bg-gray-200'
-                        }`}
-                        title="Erase parts of the drawing"
+                        className={`p-3 rounded-lg ${currentTool === Tool.ERASE ? 'bg-[#3d3d3d]' : 'hover:bg-[#2d2d2d]'}`}
+                        onClick={() => handleToolChange(Tool.ERASE)}
+                        title="Erase"
                     >
-                        Erase
+                        🗑️
                     </button>
-                </div>
-
-                {/* Shape Selection (only shown in draw mode) */}
-                {currentTool === 'draw' && (
-                    <div className="bg-white p-4 rounded-lg shadow-lg flex gap-4">
-                        <button
-                            onClick={() => setCurrentShape(ShapeType.FREEHAND)}
-                            className={`px-4 py-2 rounded ${
-                                currentShape === ShapeType.FREEHAND ? 'bg-blue-500 text-white' : 'bg-gray-200'
-                            }`}
-                            title="Freehand drawing tool"
-                        >
-                            Freehand
-                        </button>
-                        <button
-                            onClick={() => setCurrentShape(ShapeType.RECTANGLE)}
-                            className={`px-4 py-2 rounded ${
-                                currentShape === ShapeType.RECTANGLE ? 'bg-blue-500 text-white' : 'bg-gray-200'
-                            }`}
-                            title="Draw rectangles"
-                        >
-                            Rectangle
-                        </button>
-                        <button
-                            onClick={() => setCurrentShape(ShapeType.CIRCLE)}
-                            className={`px-4 py-2 rounded ${
-                                currentShape === ShapeType.CIRCLE ? 'bg-blue-500 text-white' : 'bg-gray-200'
-                            }`}
-                            title="Draw circles"
-                        >
-                            Circle
-                        </button>
+                    <div className="h-px bg-gray-600 my-2"></div>
+                    <div
+                        draggable
+                        onDragStart={(e) => handleShapeDragStart(e, ShapeType.RECTANGLE)}
+                        onDragEnd={handleShapeDragEnd}
+                        className="p-3 rounded-lg hover:bg-[#2d2d2d] cursor-move"
+                        title="Rectangle"
+                    >
+                        ⬜
                     </div>
-                )}
-
-                {/* Style Controls */}
-                <div className="bg-white p-4 rounded-lg shadow-lg flex gap-4">
-                    <input
-                        type="color"
-                        value={color}
-                        onChange={(e) => setColor(e.target.value)}
-                        className="w-10 h-10 cursor-pointer"
-                        title="Select drawing color"
-                    />
-                    <input
-                        type="range"
-                        min="1"
-                        max="20"
-                        value={thickness}
-                        onChange={(e) => setThickness(Number(e.target.value))}
-                        className="w-32"
-                        title="Adjust line thickness"
-                    />
-                </div>
-
-                {/* Action Buttons */}
-                <div className="bg-white p-4 rounded-lg shadow-lg flex gap-4">
-                    <button
-                        onClick={handleClear}
-                        className="px-4 py-2 bg-red-500 text-white rounded"
-                        title="Clear entire canvas"
+                    <div
+                        draggable
+                        onDragStart={(e) => handleShapeDragStart(e, ShapeType.CIRCLE)}
+                        onDragEnd={handleShapeDragEnd}
+                        className="p-3 rounded-lg hover:bg-[#2d2d2d] cursor-move"
+                        title="Circle"
                     >
-                        Clear All
-                    </button>
-                    {currentTool === 'select' && (
-                        <button
-                            onClick={handleDelete}
-                            className="px-4 py-2 bg-red-500 text-white rounded"
-                            title="Delete selected elements"
-                        >
-                            Delete Selected
-                        </button>
-                    )}
+                        ⭕
+                    </div>
                 </div>
             </div>
+
+            {/* Top Toolbar */}
+            <div className="absolute top-2 left-1/2 transform -translate-x-1/2 bg-[#1e1e1e] rounded-lg p-2 shadow-lg flex items-center gap-4">
+                <button
+                    className="p-2 rounded hover:bg-[#2d2d2d]"
+                    onClick={toggleDarkMode}
+                >
+                    {isDarkMode ? '☀️' : '🌙'}
+                </button>
+                {currentTool === Tool.DRAW && (
+                    <>
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="color"
+                                value={currentColor}
+                                onChange={(e) => handleColorChange(e.target.value)}
+                                className="w-8 h-8 rounded bg-transparent"
+                            />
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="range"
+                                min="1"
+                                max="20"
+                                value={currentThickness}
+                                onChange={(e) => handleThicknessChange(Number(e.target.value))}
+                                className="w-24"
+                            />
+                        </div>
+                    </>
+                )}
+                {currentTool === Tool.ERASE && (
+                    <div className="flex items-center gap-2">
+                        <input
+                            type="range"
+                            min="5"
+                            max="50"
+                            value={eraserSize}
+                            onChange={(e) => handleEraserSizeChange(Number(e.target.value))}
+                            className="w-24"
+                        />
+                    </div>
+                )}
+                <button
+                    className="p-2 rounded hover:bg-[#2d2d2d] text-red-500"
+                    onClick={handleClear}
+                >
+                    🗑️
+                </button>
+                {currentTool === Tool.SELECT && (
+                    <button
+                        className="p-2 rounded hover:bg-[#2d2d2d] text-red-500"
+                        onClick={handleDelete}
+                    >
+                        ❌
+                    </button>
+                )}
+                <div className="h-px bg-gray-600 mx-2"></div>
+                <button
+                    className="p-2 rounded hover:bg-[#2d2d2d]"
+                    onClick={exportAsPNG}
+                    title="Export as PNG"
+                >
+                    📷
+                </button>
+                <button
+                    className="p-2 rounded hover:bg-[#2d2d2d]"
+                    onClick={exportAsSVG}
+                    title="Export as SVG"
+                >
+                    📊
+                </button>
+            </div>
+
+            {/* Canvas */}
+            <canvas
+                ref={canvasRef}
+                width={window.innerWidth}
+                height={window.innerHeight}
+                className="w-full h-full"
+                onDragOver={handleCanvasDragOver}
+                onDrop={handleCanvasDrop}
+                style={{ cursor: isDraggingShape ? 'copy' : 'default' }}
+            />
+
+            {/* Shape Preview when Dragging */}
+            {isDraggingShape && draggedShape && (
+                <div
+                    className="fixed pointer-events-none bg-white/10 border-2 border-white/30 rounded"
+                    style={{
+                        width: draggedShape === ShapeType.CIRCLE ? '80px' : '100px',
+                        height: draggedShape === ShapeType.CIRCLE ? '80px' : '100px',
+                        borderRadius: draggedShape === ShapeType.CIRCLE ? '50%' : '4px',
+                        left: '0',
+                        top: '0',
+                        transform: `translate(${window.innerWidth / 2}px, ${window.innerHeight / 2}px)`
+                    }}
+                />
+            )}
         </div>
     );
 } 

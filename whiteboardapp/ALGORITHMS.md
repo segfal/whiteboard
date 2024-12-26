@@ -367,3 +367,129 @@ where:
 - Drawing Elements: O(n) where n is number of elements
 - Selection State: O(k) where k is number of selected elements
 - Memory Pool: O(m) where m is allocated memory size 
+
+## Color Management System
+### Default Color Selection
+```math
+defaultColor = isDarkMode ? '#FFFFFF' : '#000000'
+```
+The color management system uses a state machine approach to handle color transitions between dark and light modes:
+
+1. **Initial State Detection**:
+   - System checks user's preferred color scheme using `window.matchMedia('(prefers-color-scheme: dark)')`
+   - Sets initial color based on system preference
+
+2. **Color State Machine**:
+   ```
+   State = {
+     color: string,
+     isDarkMode: boolean,
+     isDefaultColor: boolean
+   }
+   
+   Transitions = {
+     TOGGLE_DARK_MODE: (state) => {
+       if (isDefaultColor(state.color)) {
+         return invertColor(state.color)
+       }
+       return state.color
+     },
+     SET_CUSTOM_COLOR: (state, color) => {
+       return {
+         ...state,
+         isDefaultColor: false,
+         color
+       }
+     }
+   }
+   ```
+
+3. **Color Synchronization**:
+   - Canvas background color is synchronized with dark mode state
+   - Drawing color is synchronized with current color state
+   - Color persistence is maintained across mode changes for custom colors
+
+### Color Inversion Algorithm
+For default colors, the inversion algorithm uses a simple mapping:
+```typescript
+function invertDefaultColor(color: string): string {
+  return color === '#FFFFFF' ? '#000000' : '#FFFFFF';
+}
+```
+
+## Dark Mode Implementation
+### Background Color Management
+The dark mode system manages two distinct color spaces:
+
+1. **UI Color Space**:
+   - Dark mode: `#1a1a1a` (background), `#1e1e1e` (toolbars)
+   - Light mode: `#ffffff` (background), `#f0f0f0` (toolbars)
+
+2. **Drawing Color Space**:
+   - Dark mode default: White (`#FFFFFF`)
+   - Light mode default: Black (`#000000`)
+   - Custom colors: Preserved across mode changes
+
+### State Synchronization
+The system uses a multi-layer state synchronization approach:
+```typescript
+interface ColorState {
+  ui: {
+    background: string;
+    toolbar: string;
+  };
+  drawing: {
+    current: string;
+    isDefault: boolean;
+  };
+}
+```
+
+State updates follow this sequence:
+1. Mode change triggered
+2. UI colors updated immediately
+3. Drawing colors checked for default status
+4. If using default colors, drawing color inverted
+5. Custom colors preserved
+6. Canvas redrawn with new colors
+
+## Export Functionality
+### PNG Export Algorithm
+1. **Canvas Duplication**:
+   ```typescript
+   const tempCanvas = document.createElement('canvas');
+   tempCanvas.width = originalCanvas.width;
+   tempCanvas.height = originalCanvas.height;
+   ```
+
+2. **Background Rendering**:
+   ```typescript
+   context.fillStyle = isDarkMode ? '#1a1a1a' : '#ffffff';
+   context.fillRect(0, 0, width, height);
+   ```
+
+3. **Content Transfer**:
+   ```typescript
+   context.drawImage(originalCanvas, 0, 0);
+   ```
+
+### SVG Export Algorithm
+1. **SVG Generation**:
+   ```typescript
+   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+   svg.setAttribute('width', width);
+   svg.setAttribute('height', height);
+   ```
+
+2. **Background Element**:
+   ```typescript
+   const background = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+   background.setAttribute('width', '100%');
+   background.setAttribute('height', '100%');
+   background.setAttribute('fill', isDarkMode ? '#1a1a1a' : '#ffffff');
+   ```
+
+3. **Path Generation**:
+   - Converts all drawing operations to SVG path elements
+   - Preserves color and stroke information
+   - Maintains shape-specific attributes (radius for circles, etc.) 

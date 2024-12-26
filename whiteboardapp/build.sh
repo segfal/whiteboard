@@ -1,20 +1,26 @@
 #!/bin/bash
 
-# build.sh
-#
-# Build script for the WebAssembly whiteboard application.
-# This script:
-# 1. Creates necessary directories
-# 2. Configures CMake with Emscripten
-# 3. Builds the WebAssembly module
-# 4. Copies output files to the Next.js public directory
-
 # Exit on any error
 set -e
 
+# Get the directory where the script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
+
 echo "Building WebAssembly Whiteboard Application..."
 
-# Create build directory if it doesn't exist
+# Verify source files exist
+if [ ! -f "wasm/whiteboard.cpp" ]; then
+    echo "Error: whiteboard.cpp not found in wasm directory"
+    exit 1
+fi
+
+# Clean previous build artifacts
+rm -rf build
+rm -rf public/wasm
+mkdir -p public/wasm
+
+# Create build directory
 echo "Creating build directory..."
 mkdir -p build
 cd build
@@ -25,22 +31,20 @@ emcmake cmake ..
 
 # Build the project
 echo "Building WebAssembly module..."
-emmake make
+emmake make VERBOSE=1
 
-# Create public/wasm directory if it doesn't exist
-echo "Creating public/wasm directory..."
-mkdir -p ../public/wasm
-
-# Copy WebAssembly files to public directory
-echo "Copying build output to public directory..."
-cp dist/whiteboard.js ../public/wasm/
-cp dist/whiteboard.wasm ../public/wasm/
-
-echo "Build complete! Files are located in public/wasm/"
-echo "- whiteboard.js"
-echo "- whiteboard.wasm"
-
-# Return to original directory
+# Go back to project root
 cd ..
+
+# Verify the output files exist
+if [ -f "public/wasm/whiteboard.js" ] && [ -f "public/wasm/whiteboard.wasm" ]; then
+    echo "Build successful!"
+    echo "Output files:"
+    echo "- public/wasm/whiteboard.js"
+    echo "- public/wasm/whiteboard.wasm"
+else
+    echo "Error: Build files were not generated correctly"
+    exit 1
+fi
 
 echo "You can now start the Next.js development server with: npm run dev" 

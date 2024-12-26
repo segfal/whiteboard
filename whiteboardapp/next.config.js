@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
     webpack: (config, { isServer }) => {
-        // Add WASM support
+        // Enable WebAssembly
         config.experiments = {
             ...config.experiments,
             asyncWebAssembly: true,
@@ -16,7 +16,7 @@ const nextConfig = {
 
         // Handle JS files from public directory
         config.module.rules.push({
-            test: /\.js$/,
+            test: /whiteboard\.js$/,
             type: 'javascript/auto',
             resolve: {
                 fullySpecified: false,
@@ -25,15 +25,24 @@ const nextConfig = {
 
         return config;
     },
-    // Serve WASM files with correct MIME type
+    // Add headers for WASM and JS files
     async headers() {
         return [
             {
-                source: '/:path*.wasm',
+                source: '/wasm/:path*',
                 headers: [
                     {
                         key: 'Content-Type',
                         value: 'application/wasm',
+                    },
+                ],
+            },
+            {
+                source: '/wasm/whiteboard.js',
+                headers: [
+                    {
+                        key: 'Content-Type',
+                        value: 'application/javascript',
                     },
                 ],
             },

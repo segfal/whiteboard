@@ -60,10 +60,23 @@ interface Whiteboard {
     moveSelected(dx: number, dy: number): void;     // Move selected elements
     deleteSelected(): void;                        // Delete selected elements
     clearSelection(): void;                        // Clear selection state
+    redraw(): void;
 }
 
 // Module cache to prevent reloading the WebAssembly module
 let wasmModule: any = null;
+
+/**
+ * @brief Tool types available for drawing
+ * 
+ * These values must match the C++ Tool enum exactly.
+ * Used to communicate the current drawing tool between TypeScript and C++.
+ */
+export enum Tool {
+    DRAW = 'DRAW',
+    SELECT = 'SELECT',
+    ERASE = 'ERASE'
+}
 
 /**
  * @brief Main wrapper class for the WebAssembly whiteboard
@@ -81,10 +94,14 @@ export class WhiteboardWrapper {
     private canvas: HTMLCanvasElement | null = null;       // Canvas element
     private context: CanvasRenderingContext2D | null = null; // Canvas context
     private isDrawing = false;                            // Drawing state flag
-    private isSelecting = false;                          // Selection mode flag
     private lastX = 0;                                    // Last mouse/touch X position
     private lastY = 0;                                    // Last mouse/touch Y position
     private currentShape: ShapeType = ShapeType.FREEHAND; // Current shape tool
+    private currentTool: Tool = Tool.DRAW;                // Current tool
+    private eraserRadius = 20; // Default eraser size
+    private dragStartX = 0;
+    private dragStartY = 0;
+    private isDraggingSelection = false;
 
     /**
      * @brief Initialize the whiteboard with a canvas element
@@ -110,12 +127,12 @@ export class WhiteboardWrapper {
         try {
             // Load WebAssembly module if not already loaded
             if (!wasmModule) {
-                const { default: createModule } = await import(/* webpackIgnore: true */ '/whiteboard.js');
+                const { default: createModule } = await import(/* webpackIgnore: true */ '/wasm/whiteboard.js');
                 wasmModule = await createModule({
                     locateFile: (path: string) => {
                         // Handle WebAssembly file location
                         if (path.endsWith('.wasm')) {
-                            return '/whiteboard.wasm';
+                            return '/wasm/whiteboard.wasm';
                         }
                         return path;
                     },
@@ -172,11 +189,26 @@ export class WhiteboardWrapper {
         this.isDrawing = true;
         this.lastX = x;
         this.lastY = y;
+        this.dragStartX = x;
+        this.dragStartY = y;
 
-        if (this.isSelecting) {
-            this.whiteboard.startSelection(x, y);
-        } else {
-            this.whiteboard.startDrawing(x, y);
+        switch (this.currentTool) {
+            case Tool.DRAW:
+                this.whiteboard.startDrawing(x, y);
+                break;
+            case Tool.SELECT:
+                if (e.shiftKey) {
+                    // Start selection box
+                    this.whiteboard.startSelection(x, y);
+                    this.isDraggingSelection = false;
+                } else {
+                    // Start dragging selected shapes
+                    this.isDraggingSelection = true;
+                }
+                break;
+            case Tool.ERASE:
+                this.whiteboard.erase(x, y, this.eraserRadius);
+                break;
         }
         this.draw();
     };
@@ -188,16 +220,37 @@ export class WhiteboardWrapper {
      * Converts window coordinates to canvas coordinates.
      */
     private handleMouseMove = (e: MouseEvent) => {
-        if (!this.isDrawing || !this.whiteboard || !this.canvas) return;
+        if (!this.whiteboard || !this.canvas) return;
 
         const rect = this.canvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        if (this.isSelecting) {
-            this.whiteboard.updateSelection(x, y);
-        } else {
-            this.whiteboard.continueDrawing(x, y);
+        // Always draw eraser circle if in erase mode
+        if (this.currentTool === Tool.ERASE) {
+            this.drawEraserCircle(x, y);
+        }
+
+        if (!this.isDrawing) return;
+
+        switch (this.currentTool) {
+            case Tool.DRAW:
+                this.whiteboard.continueDrawing(x, y);
+                break;
+            case Tool.SELECT:
+                if (!this.isDraggingSelection) {
+                    // Update selection box
+                    this.whiteboard.updateSelection(x, y);
+                } else {
+                    // Move selected shapes
+                    const dx = x - this.lastX;
+                    const dy = y - this.lastY;
+                    this.whiteboard.moveSelected(dx, dy);
+                }
+                break;
+            case Tool.ERASE:
+                this.whiteboard.erase(x, y, this.eraserRadius);
+                break;
         }
 
         this.lastX = x;
@@ -214,11 +267,17 @@ export class WhiteboardWrapper {
         if (!this.whiteboard || !this.isDrawing) return;
 
         this.isDrawing = false;
-        if (this.isSelecting) {
-            this.whiteboard.endSelection();
-        } else {
-            this.whiteboard.endDrawing();
+        this.isDraggingSelection = false;
+
+        switch (this.currentTool) {
+            case Tool.DRAW:
+                this.whiteboard.endDrawing();
+                break;
+            case Tool.SELECT:
+                this.whiteboard.endSelection();
+                break;
         }
+        this.draw();
     };
 
     /**
@@ -239,11 +298,26 @@ export class WhiteboardWrapper {
         this.isDrawing = true;
         this.lastX = x;
         this.lastY = y;
+        this.dragStartX = x;
+        this.dragStartY = y;
 
-        if (this.isSelecting) {
-            this.whiteboard.startSelection(x, y);
-        } else {
-            this.whiteboard.startDrawing(x, y);
+        switch (this.currentTool) {
+            case Tool.DRAW:
+                this.whiteboard.startDrawing(x, y);
+                break;
+            case Tool.SELECT:
+                if (e.touches.length === 2) {
+                    // Two-finger touch starts selection
+                    this.whiteboard.startSelection(x, y);
+                    this.isDraggingSelection = false;
+                } else {
+                    // Single-finger touch starts dragging
+                    this.isDraggingSelection = true;
+                }
+                break;
+            case Tool.ERASE:
+                this.whiteboard.erase(x, y, this.eraserRadius);
+                break;
         }
         this.draw();
     };
@@ -255,7 +329,7 @@ export class WhiteboardWrapper {
      * Converts window coordinates to canvas coordinates.
      */
     private handleTouchMove = (e: TouchEvent) => {
-        if (!this.isDrawing || !this.whiteboard || !this.canvas) return;
+        if (!this.whiteboard || !this.canvas || !this.isDrawing) return;
         e.preventDefault();
 
         const rect = this.canvas.getBoundingClientRect();
@@ -263,10 +337,22 @@ export class WhiteboardWrapper {
         const x = touch.clientX - rect.left;
         const y = touch.clientY - rect.top;
 
-        if (this.isSelecting) {
-            this.whiteboard.updateSelection(x, y);
-        } else {
-            this.whiteboard.continueDrawing(x, y);
+        switch (this.currentTool) {
+            case Tool.DRAW:
+                this.whiteboard.continueDrawing(x, y);
+                break;
+            case Tool.SELECT:
+                if (!this.isDraggingSelection) {
+                    this.whiteboard.updateSelection(x, y);
+                } else {
+                    const dx = x - this.lastX;
+                    const dy = y - this.lastY;
+                    this.whiteboard.moveSelected(dx, dy);
+                }
+                break;
+            case Tool.ERASE:
+                this.whiteboard.erase(x, y, this.eraserRadius);
+                break;
         }
 
         this.lastX = x;
@@ -284,11 +370,17 @@ export class WhiteboardWrapper {
         if (!this.whiteboard || !this.isDrawing) return;
 
         this.isDrawing = false;
-        if (this.isSelecting) {
-            this.whiteboard.endSelection();
-        } else {
-            this.whiteboard.endDrawing();
+        this.isDraggingSelection = false;
+
+        switch (this.currentTool) {
+            case Tool.DRAW:
+                this.whiteboard.endDrawing();
+                break;
+            case Tool.SELECT:
+                this.whiteboard.endSelection();
+                break;
         }
+        this.draw();
     };
 
     /**
@@ -302,14 +394,32 @@ export class WhiteboardWrapper {
     }
 
     /**
-     * @brief Toggle selection mode
-     * @param enabled Whether selection mode should be enabled
+     * @brief Set the current tool
+     * @param tool Tool type to use for drawing
      */
-    toggleSelection(enabled: boolean) {
-        this.isSelecting = enabled;
-        if (!enabled && this.whiteboard) {
-            this.whiteboard.clearSelection();
+    setTool(tool: Tool) {
+        this.currentTool = tool;
+        if (this.canvas) {
+            switch (tool) {
+                case Tool.SELECT:
+                    this.canvas.style.cursor = 'crosshair';
+                    break;
+                case Tool.ERASE:
+                    this.canvas.style.cursor = 'none';
+                    break;
+                case Tool.DRAW:
+                    this.canvas.style.cursor = this.currentShape === ShapeType.FREEHAND ? 'default' : 'crosshair';
+                    break;
+            }
         }
+    }
+
+    /**
+     * @brief Set the eraser size
+     * @param size Eraser size in pixels
+     */
+    setEraserSize(size: number) {
+        this.eraserRadius = size;
     }
 
     /**
@@ -381,5 +491,105 @@ export class WhiteboardWrapper {
         if (!this.whiteboard || !this.context || !this.canvas) return;
         this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
         this.whiteboard.draw(this.context);
+    }
+
+    /**
+     * @brief Draw the eraser circle on the canvas
+     * @param x X coordinate of eraser center
+     * @param y Y coordinate of eraser center
+     */
+    private drawEraserCircle(x: number, y: number) {
+        if (!this.context || !this.canvas) return;
+
+        // Redraw the main content
+        this.draw();
+
+        // Draw eraser circle
+        this.context.beginPath();
+        this.context.arc(x, y, this.eraserRadius, 0, Math.PI * 2);
+        this.context.strokeStyle = '#000000';
+        this.context.lineWidth = 1;
+        this.context.stroke();
+    }
+
+    /**
+     * @brief Create a shape at the specified position
+     * @param shape Shape type to create
+     * @param x X coordinate for shape center
+     * @param y Y coordinate for shape center
+     */
+    createShape(shape: ShapeType, x: number, y: number) {
+        if (!this.whiteboard) return;
+        
+        // Set the current shape type
+        this.currentShape = shape;
+        this.whiteboard.setShapeType(shape);
+        
+        // Create the shape
+        this.whiteboard.startDrawing(x, y);
+        this.whiteboard.endDrawing();
+        
+        // Redraw to show the new shape
+        this.draw();
+    }
+
+    /**
+     * @brief Handle canvas drag over event
+     * @param e Drag event
+     */
+    private handleCanvasDragOver = (e: DragEvent) => {
+        e.preventDefault();
+        if (this.canvas) {
+            this.canvas.style.cursor = 'copy';
+        }
+    };
+
+    /**
+     * @brief Handle canvas drop event
+     * @param e Drop event
+     */
+    private handleCanvasDrop = (e: DragEvent) => {
+        e.preventDefault();
+        if (!this.whiteboard || !this.canvas) return;
+
+        const rect = this.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const shape = e.dataTransfer?.getData('shape') as ShapeType;
+
+        if (shape) {
+            this.createShape(shape, x, y);
+        }
+
+        if (this.canvas) {
+            this.canvas.style.cursor = 'default';
+        }
+    };
+
+    /**
+     * @brief Get SVG representation of the current drawing
+     * @returns SVG content as a string
+     */
+    getSVGContent(): string {
+        if (!this.whiteboard || !this.canvas) return '';
+        
+        let svgContent = '';
+        
+        // Get SVG paths from the whiteboard
+        const paths = this.whiteboard.getSVGPaths();
+        if (paths) {
+            svgContent = paths;
+        }
+        
+        return svgContent;
+    }
+
+    redraw(): void {
+        if (this.whiteboard && this.context) {
+            // Clear the canvas
+            this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            // Redraw all shapes
+            this.whiteboard.redraw();
+        }
     }
 } 
